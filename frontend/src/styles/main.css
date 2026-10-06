@@ -1,0 +1,335 @@
+/* 碑帖拓片编目与版本比对台 · 全局样式
+   石墨青 / 拓片米黄 / 朱印，配宋体字族，贴近拓本编目与校勘的观感。 */
+
+:root {
+  --gb-paper: #f4f1e6;
+  --gb-paper-light: #fffdf7;
+  --gb-ink: #2b2a26;
+  --gb-red: #2f3a34;
+  --gb-gold: #a8623a;
+  --gb-green: #2f6f4f;
+  --gb-blue: #3a6ea5;
+  --gb-line: rgba(47, 58, 52, 0.16);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--gb-paper);
+  color: var(--gb-ink);
+  font-family: 'Songti SC', 'Noto Serif SC', 'Source Han Serif SC', 'PingFang SC', 'Microsoft YaHei', serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* 大漆光泽底纹 */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0.55;
+  background-image:
+    radial-gradient(circle at 12% 16%, rgba(168, 98, 58, 0.12), transparent 42%),
+    radial-gradient(circle at 86% 6%, rgba(47, 58, 52, 0.10), transparent 40%),
+    repeating-linear-gradient(0deg, rgba(43, 42, 38, 0.02) 0 1px, transparent 1px 4px);
+}
+
+#root {
+  position: relative;
+  z-index: 1;
+}
+
+/* ---------------- 通用面板 ---------------- */
+.gb-panel {
+  background: var(--gb-paper-light);
+  border: 1px solid var(--gb-line);
+  border-radius: 10px;
+  padding: 16px;
+  box-shadow: 0 2px 10px rgba(43, 42, 38, 0.05);
+}
+
+.gb-panel + .gb-panel {
+  margin-top: 16px;
+}
+
+.gb-page-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.gb-page-head h2 {
+  margin: 0;
+  font-size: 20px;
+  letter-spacing: 1px;
+}
+
+.gb-page-head p {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: #7a6f64;
+}
+
+.gb-stat-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+/* ---------------- FilterBar ---------------- */
+.gb-filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  background: var(--gb-paper-light);
+  border: 1px solid var(--gb-line);
+  border-radius: 10px;
+}
+
+.gb-filter-bar__label {
+  font-size: 13px;
+  color: #6b6257;
+}
+
+/* ---------------- StatBadge ---------------- */
+.gb-stat-badge {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 140px;
+  padding: 12px 14px;
+  background: var(--gb-paper-light);
+  border: 1px solid var(--gb-line);
+  border-left: 4px solid var(--gb-red);
+  border-radius: 10px;
+}
+
+.gb-stat-badge.is-small {
+  min-width: 108px;
+  padding: 8px 10px;
+}
+
+.gb-stat-badge__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.gb-stat-badge__body {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.gb-stat-badge__value {
+  font-size: 22px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.gb-stat-badge.is-small .gb-stat-badge__value {
+  font-size: 18px;
+}
+
+.gb-stat-badge__suffix {
+  font-size: 12px;
+  color: #8c8479;
+}
+
+/* ---------------- EmptyPanel ---------------- */
+.gb-empty-panel {
+  padding: 48px 24px;
+  text-align: center;
+  background: var(--gb-paper-light);
+  border: 1px dashed rgba(47, 58, 52, 0.3);
+  border-radius: 10px;
+}
+
+.gb-empty-panel.is-small {
+  padding: 20px 12px;
+}
+
+/* ---------------- 卡片与拖拽 ---------------- */
+.gb-body-card {
+  cursor: pointer;
+  transition: box-shadow 0.18s ease, transform 0.18s ease;
+}
+
+.gb-body-card:hover {
+  box-shadow: 0 6px 18px rgba(43, 42, 38, 0.12);
+}
+
+.gb-body-card.is-active {
+  border-color: var(--gb-red);
+  box-shadow: 0 0 0 2px rgba(47, 58, 52, 0.18);
+}
+
+.gb-drag-handle {
+  cursor: grab;
+  color: rgba(43, 42, 38, 0.42);
+  padding-inline-end: 6px;
+}
+
+.gb-row-dragging {
+  opacity: 0.5;
+}
+
+.gb-row-drop-target {
+  border-top: 2px dashed var(--gb-red);
+}
+
+/* 器型示意区：镶嵌纹饰叠加显示 */
+.gb-vessel {
+  position: relative;
+  width: 180px;
+  height: 180px;
+  border-radius: 12px;
+  background: radial-gradient(circle at 50% 35%, #3a4038 0%, #1b201c 70%);
+  border: 1px solid rgba(168, 98, 58, 0.4);
+  overflow: hidden;
+}
+
+.gb-vessel__shape {
+  position: absolute;
+  inset: 26px 34px;
+  border: 1px solid rgba(168, 98, 58, 0.75);
+  background: rgba(168, 98, 58, 0.08);
+}
+
+.gb-vessel__shape.is-bowl {
+  border-radius: 0 0 60% 60% / 0 0 78% 78%;
+}
+
+.gb-vessel__shape.is-plate {
+  border-radius: 50%;
+}
+
+.gb-vessel__shape.is-box {
+  border-radius: 8px;
+}
+
+.gb-vessel__shape.is-vase {
+  border-radius: 42% 42% 26% 26% / 30% 30% 18% 18%;
+}
+
+.gb-vessel__mark {
+  position: absolute;
+  padding: 2px 6px;
+  font-size: 11px;
+  border-radius: 6px;
+  background: rgba(255, 253, 247, 0.9);
+  border: 1px solid rgba(168, 98, 58, 0.6);
+  white-space: nowrap;
+}
+
+.gb-vessel__legend {
+  margin-top: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* ---------------- 表格微调 ---------------- */
+.gb-table-card .ant-card-body {
+  padding: 0;
+}
+
+.ant-table-wrapper .ant-table-thead > tr > th {
+  background: #f7efe1;
+}
+
+.ant-layout-sider .ant-menu {
+  background: transparent;
+}
+
+/* 损泐字位网格（比对台与标注台共用） */
+.gb-loss-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.gb-loss-grid__line {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.gb-loss-grid__label {
+  width: 46px;
+  font-size: 12px;
+  color: #7a7466;
+  text-align: right;
+}
+
+.gb-loss-cell {
+  width: 34px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(47, 58, 52, 0.18);
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  background: #fffdf7;
+  transition: all 0.15s ease;
+}
+
+.gb-loss-cell:hover {
+  border-color: #a8623a;
+  box-shadow: 0 0 0 2px rgba(168, 98, 58, 0.18);
+}
+
+.gb-loss-cell.is-empty {
+  color: rgba(43, 42, 38, 0.3);
+}
+
+.gb-loss-cell.is-marked {
+  color: #fff;
+  border-color: transparent;
+}
+
+.gb-loss-cell.is-diff {
+  outline: 2px dashed #a8623a;
+  outline-offset: 1px;
+}
+
+.gb-diff-pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.gb-diff-card {
+  padding: 8px 10px;
+  border: 1px solid var(--gb-line);
+  border-radius: 8px;
+  background: #fffdf7;
+  font-size: 13px;
+}
+
+.gb-diff-card.is-a {
+  border-left: 4px solid #2f3a34;
+}
+
+.gb-diff-card.is-b {
+  border-left: 4px solid #a8623a;
+}
