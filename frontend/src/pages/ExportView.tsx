@@ -34,6 +34,7 @@ import { loadAll } from '@/stores/store';
 import { selectSteles, setCurrentStele } from '@/stores/steleSlice';
 import { selectRubbings } from '@/stores/rubbingSlice';
 import { selectCompares, selectLosses } from '@/stores/lossSlice';
+import { selectShelfContainers, selectShelfEntries, selectShelfLayers } from '@/stores/shelfSlice';
 import { SEAL_TYPE_COLOR, SEAL_TYPE_LABEL, sealPositionWeight, type Seal, type SealType } from '@/types/seal';
 import { RUBBING_METHOD_LABEL, RUBBING_STATE_LABEL } from '@/types/rubbing';
 import { COMPARE_CONCLUSION_COLOR, COMPARE_CONCLUSION_LABEL } from '@/types/compare';
@@ -54,6 +55,7 @@ import {
   copyText,
   exportCatalogCard,
   exportLossLedgerCsv,
+  exportShelfLedgerCsv,
   exportSnapshotJson,
 } from '@/utils/export';
 
@@ -66,6 +68,9 @@ export default function ExportView() {
   const rubbings = useAppSelector(selectRubbings);
   const losses = useAppSelector(selectLosses);
   const compares = useAppSelector(selectCompares);
+  const shelfLayers = useAppSelector(selectShelfLayers);
+  const shelfContainers = useAppSelector(selectShelfContainers);
+  const shelfEntries = useAppSelector(selectShelfEntries);
   const sealTable = useIdbTable<Seal>((database) => database.seals, { sortByUpdatedAt: false });
 
   const [steleId, setSteleId] = useState<string>('');
@@ -354,7 +359,7 @@ export default function ExportView() {
           <Card title="整库导出" style={{ marginTop: 16 }}>
             <Space direction="vertical" size={10} style={{ width: '100%' }}>
               <Typography.Text type="secondary">
-                导出文件包含 5 张业务表全量数据与结构版本号，可在其他设备通过「导入 JSON」还原。
+                导出文件包含 8 张业务表全量数据与结构版本号，可在其他设备通过「导入 JSON」还原。
               </Typography.Text>
               <Space wrap>
                 <Button icon={<CloudDownloadOutlined />} onClick={() => void handleExport()}>
@@ -367,6 +372,20 @@ export default function ExportView() {
                   }}
                 >
                   损泐台账 CSV
+                </Button>
+                <Button
+                  onClick={() => {
+                    const filename = exportShelfLedgerCsv({
+                      layers: shelfLayers,
+                      containers: shelfContainers,
+                      entries: shelfEntries,
+                      rubbings,
+                      steles,
+                    });
+                    message.success(`已导出 ${filename}`);
+                  }}
+                >
+                  库房排架账 CSV
                 </Button>
               </Space>
               <Alert

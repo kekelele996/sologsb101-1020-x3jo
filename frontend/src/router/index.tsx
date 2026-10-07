@@ -10,6 +10,7 @@ import App from '../App';
 
 const SteleList = lazy(() => import('../pages/SteleList'));
 const RubbingList = lazy(() => import('../pages/RubbingList'));
+const ShelfBoard = lazy(() => import('../pages/ShelfBoard'));
 const LossBoard = lazy(() => import('../pages/LossBoard'));
 const CompareView = lazy(() => import('../pages/CompareView'));
 const ExportView = lazy(() => import('../pages/ExportView'));
@@ -17,6 +18,7 @@ const ExportView = lazy(() => import('../pages/ExportView'));
 export const ROUTES = {
   steles: '/steles',
   rubbings: '/rubbings',
+  shelves: '/shelves',
   losses: '/losses',
   compare: '/compare',
   export: '/export',
@@ -38,6 +40,7 @@ export const appRoutes: RouteObject[] = [
       { index: true, element: <Navigate to={ROUTES.steles} replace /> },
       { path: 'steles', element: withSuspense(<SteleList />) },
       { path: 'rubbings', element: withSuspense(<RubbingList />) },
+      { path: 'shelves', element: withSuspense(<ShelfBoard />) },
       { path: 'losses', element: withSuspense(<LossBoard />) },
       { path: 'compare', element: withSuspense(<CompareView />) },
       { path: 'export', element: withSuspense(<ExportView />) },

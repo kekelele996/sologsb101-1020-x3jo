@@ -73,6 +73,13 @@ import {
   type SealType,
 } from '@/types/seal';
 import { selectLosses } from '@/stores/lossSlice';
+import { selectShelfEntryByRubbing } from '@/stores/shelfSlice';
+import {
+  CONTAINER_STATUS_COLOR,
+  CONTAINER_STATUS_LABEL,
+  SHELF_ENTRY_STATUS_COLOR,
+  SHELF_ENTRY_STATUS_LABEL,
+} from '@/types/shelf';
 import LossTag from '@/components/common/LossTag';
 
 const FILTER_KEYS = ['method', 'state'] as const;
@@ -88,6 +95,8 @@ export default function RubbingList() {
   const filtered = useAppSelector(selectFilteredRubbings);
   const seals = useAppSelector(selectSeals);
   const losses = useAppSelector(selectLosses);
+  const shelfEntryByRubbing = useAppSelector(selectShelfEntryByRubbing);
+  const shelfContainers = useAppSelector((state) => state.shelf.containers);
   const steleFilterId = useAppSelector((state) => state.rubbing.filters.steleId);
 
   const url = useFilterQuery(FILTER_KEYS);
@@ -215,6 +224,34 @@ export default function RubbingList() {
     { title: '纸种', dataIndex: 'paperType', width: 100 },
     { title: '墨色', dataIndex: 'inkTone', width: 90, render: (value: InkTone) => INK_TONE_LABEL[value] },
     { title: '尺寸', dataIndex: 'sizeCm', width: 110, render: (value: string) => value || '未记' },
+    {
+      title: '库房排架',
+      key: 'shelf',
+      width: 150,
+      render: (_value, record) => {
+        const entry = shelfEntryByRubbing.get(record.id);
+        if (!entry) return <Tag>未入账</Tag>;
+        const container = entry.containerId ? shelfContainers.find((item) => item.id === entry.containerId) : undefined;
+        return (
+          <Space direction="vertical" size={0}>
+            <Space size={4}>
+              <Tag color={SHELF_ENTRY_STATUS_COLOR[entry.status]} style={{ marginInlineEnd: 0 }}>
+                {SHELF_ENTRY_STATUS_LABEL[entry.status]}
+              </Tag>
+              {container ? (
+                <Tag color={CONTAINER_STATUS_COLOR[container.status]} style={{ marginInlineEnd: 0 }}>
+                  {container.code}
+                </Tag>
+              ) : null}
+            </Space>
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+              库房实测{entry.measuredSizeCm ? ` ${entry.measuredSizeCm}` : '未测'}
+              {container?.status === 'writeFailed' ? ` · ${CONTAINER_STATUS_LABEL.writeFailed}` : ''}
+            </Typography.Text>
+          </Space>
+        );
+      },
+    },
     { title: '收藏号', dataIndex: 'collectionNo', width: 120, render: (value: string) => value || '未编' },
     { title: '年代判断', dataIndex: 'dateGuess', width: 120, render: (value: string) => value || '待考' },
     {

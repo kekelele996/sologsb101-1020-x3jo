@@ -1,23 +1,26 @@
 /**
  * IndexedDB 持久化层（Dexie 封装）
- * - 数据结构版本号与升级迁移逻辑（v1 → v2：Loss 增加 charNo 与复合索引，并按行号顺序重建历史字位记录）
- * - 五张业务表的增删改查与整库导入导出
+ * - 数据结构版本号与升级迁移逻辑（v1 → v2：Loss 增加 charNo 与复合索引，并按行号顺序重建历史字位记录；
+ *   v2 → v3：接入库房排架——旧拓本无装具号，按尺寸先粗分，分不上的留待上架）
+ * - 八张业务表的增删改查与整库导入导出
  * - 首次打开自动播种三层互相引用的演示数据（幂等）
  * 纯前端应用：不依赖任何后端服务或数据库。
  */
-import Dexie, { type Table } from 'dexie';
+import Dexie, { type Table, type Transaction } from 'dexie';
 import type { Stele } from '@/types/stele';
 import type { Rubbing } from '@/types/rubbing';
 import type { Loss } from '@/types/loss';
 import type { Seal } from '@/types/seal';
 import type { Compare } from '@/types/compare';
+import type { Container, ShelfEntry, ShelfLayer } from '@/types/shelf';
+import { bucketOfSize } from './shelfPack';
 import { sortLosses } from './collate';
 
 /** 数据库名（README 与导出文件均使用该名称） */
 export const DB_NAME = 'gbrubbing';
 
 /** 当前数据结构版本号 */
-export const DB_SCHEMA_VERSION = 2;
+export const DB_SCHEMA_VERSION = 3;
 
 /** localStorage 侧少量元数据键 */
 export const LS_KEYS = {
@@ -85,6 +88,9 @@ class RubbingDatabase extends Dexie {
   losses!: Table<Loss, string>;
   seals!: Table<Seal, string>;
   compares!: Table<Compare, string>;
+  shelfLayers!: Table<ShelfLayer, string>;
+  shelfContainers!: Table<Container, string>;
+  shelfEntries!: Table<ShelfEntry, string>;
 
   constructor() {
     super(DB_NAME);
@@ -99,7 +105,7 @@ class RubbingDatabase extends Dexie {
     });
 
     // v2：Loss 增加 charNo 与 [rubbingId+lineNo+charNo] 复合索引，并按行号顺序重建历史字位记录
-    this.version(DB_SCHEMA_VERSION)
+    this.version(2)
       .stores({
         steles: 'id, title, era, form, location, updatedAt',
         rubbings: 'id, steleId, versionNo, method, inkTone, state, updatedAt',
@@ -127,6 +133,50 @@ class RubbingDatabase extends Dexie {
           });
         });
         await table.bulkPut(sortLosses(rebuilt));
+      });
+
+    // v3：接入库房排架账（层 / 装具 / 排架条目）。
+    // 旧拓本没有装具号：升级时按编目尺寸先粗分（大/中/小件），先记着不上架；
+    // 尺寸分不上的（缺尺寸 / 单件超装具 / 不可辨）留待上架，等人按库房实测重分。
+    this.version(DB_SCHEMA_VERSION)
+      .stores({
+        steles: 'id, title, era, form, location, updatedAt',
+        rubbings: 'id, steleId, versionNo, method, inkTone, state, updatedAt',
+        losses: 'id, rubbingId, lineNo, charNo, [rubbingId+lineNo+charNo], type, severity, updatedAt',
+        seals: 'id, rubbingId, sealType, position, updatedAt',
+        compares: 'id, steleId, rubbingIdA, rubbingIdB, conclusion, date, updatedAt',
+        shelfLayers: 'id, seq, slotsUsed, updatedAt',
+        shelfContainers: 'id, sequenceNo, bucket, layerId, slotNo, status, updatedAt',
+        shelfEntries: 'id, rubbingId, collectionNo, containerId, bucket, status, updatedAt',
+      })
+      .upgrade(async (tx) => {
+        const rubbingTable = tx.table<Rubbing>('rubbings');
+        const entryTable = tx.table<ShelfEntry>('shelfEntries');
+        const legacy = await rubbingTable.toArray();
+        const now = Date.now();
+        const entries: ShelfEntry[] = legacy
+          .filter((rubbing) => rubbing.collectionNo && rubbing.collectionNo.trim().length > 0)
+          .map((rubbing, index) => {
+            const bucket = bucketOfSize(rubbing.sizeCm);
+            const pendingShelf = bucket === null;
+            return {
+              id: `shent_upgrade_${index + 1}`,
+              collectionNo: rubbing.collectionNo,
+              rubbingId: rubbing.id,
+              // 旧拓本只有编目尺寸，库房实测留空，等排架账对账时以库房量的为准
+              measuredSizeCm: '',
+              catalogSizeCmSnapshot: rubbing.sizeCm,
+              bucket,
+              containerId: null,
+              status: pendingShelf ? 'pendingShelf' : 'pending',
+              attempts: 0,
+              lastError: '',
+              note: pendingShelf ? '旧拓本升级：尺寸分不上，留待上架' : '旧拓本升级：按编目尺寸粗分，待库房实测对账',
+              createdAt: now,
+              updatedAt: now,
+            };
+          });
+        if (entries.length > 0) await entryTable.bulkPut(entries);
       });
   }
 }
@@ -224,12 +274,35 @@ export async function seedDatabase(): Promise<void> {
     { id: 'cmp_0201', steleId: 'stele_02', rubbingIdA: 'rub_0201', rubbingIdB: 'rub_0202', diffCount: 1, conclusion: 'late', operator: '傅砚', date: '2026-03-08', createdAt: now - day * 3, updatedAt: now - day * 3 },
   ];
 
-  await db.transaction('rw', [db.steles, db.rubbings, db.losses, db.seals, db.compares], async () => {
+  // 库房排架账：一层固定摆 4 个装具；大件装具 960cm、中件 720cm 上限
+  const shelfLayers: ShelfLayer[] = [
+    { id: 'slayer_seed_1', seq: 1, name: '第 1 层', slotCount: 4, slotsUsed: 2, createdAt: now - day * 2, updatedAt: now - day * 1 },
+  ];
+
+  const shelfContainers: Container[] = [
+    { id: 'sctr_seed_001', code: '装具-001', sequenceNo: 1, bucket: 'large', sizeLimitCm: 960, totalSizeCm: 500, layerId: 'slayer_seed_1', slotNo: 1, status: 'ready', attempts: 0, lastError: '', createdAt: now - day * 2, updatedAt: now - day * 1 },
+    { id: 'sctr_seed_002', code: '装具-002', sequenceNo: 2, bucket: 'medium', sizeLimitCm: 720, totalSizeCm: 418, layerId: 'slayer_seed_1', slotNo: 2, status: 'ready', attempts: 0, lastError: '', createdAt: now - day * 2, updatedAt: now - day * 1 },
+  ];
+
+  const shelfEntries: ShelfEntry[] = [
+    { id: 'shent_seed_0201', collectionNo: 'TB-0201', rubbingId: 'rub_0201', measuredSizeCm: '252×196', catalogSizeCmSnapshot: '250×196', bucket: 'large', containerId: 'sctr_seed_001', status: 'shelved', attempts: 1, lastError: '', note: '库房实测 252×196，尺寸以库房为准', createdAt: now - day * 2, updatedAt: now - day * 1 },
+    { id: 'shent_seed_0202', collectionNo: 'TB-0202', rubbingId: 'rub_0202', measuredSizeCm: '248×194', catalogSizeCmSnapshot: '248×194', bucket: 'large', containerId: 'sctr_seed_001', status: 'shelved', attempts: 1, lastError: '', note: '', createdAt: now - day * 2, updatedAt: now - day * 1 },
+    { id: 'shent_seed_0101', collectionNo: 'TB-0101', rubbingId: 'rub_0101', measuredSizeCm: '210×88', catalogSizeCmSnapshot: '210×88', bucket: 'medium', containerId: 'sctr_seed_002', status: 'shelved', attempts: 1, lastError: '', note: '', createdAt: now - day * 2, updatedAt: now - day * 1 },
+    { id: 'shent_seed_0102', collectionNo: 'TB-0102', rubbingId: 'rub_0102', measuredSizeCm: '208×86', catalogSizeCmSnapshot: '208×86', bucket: 'medium', containerId: 'sctr_seed_002', status: 'shelved', attempts: 1, lastError: '', note: '', createdAt: now - day * 2, updatedAt: now - day * 1 },
+    { id: 'shent_seed_0301', collectionNo: 'TB-0301', rubbingId: 'rub_0301', measuredSizeCm: '260×90', catalogSizeCmSnapshot: '260×90', bucket: 'large', containerId: null, status: 'pending', attempts: 0, lastError: '', note: '已粗分，待装入装具', createdAt: now - day * 1, updatedAt: now - day * 1 },
+    { id: 'shent_seed_claim', collectionNo: 'TB-9009', rubbingId: null, measuredSizeCm: '205×85', catalogSizeCmSnapshot: '', bucket: 'medium', containerId: null, status: 'pendingClaim', attempts: 0, lastError: '', note: '排架账上认不出对应拓本，等人认领', createdAt: now - day * 1, updatedAt: now - day * 1 },
+    { id: 'shent_seed_hold', collectionNo: 'TB-9010', rubbingId: null, measuredSizeCm: '尺寸待补', catalogSizeCmSnapshot: '', bucket: null, containerId: null, status: 'pendingShelf', attempts: 0, lastError: '', note: '尺寸分不上，留待上架', createdAt: now - day * 1, updatedAt: now - day * 1 },
+  ];
+
+  await db.transaction('rw', [db.steles, db.rubbings, db.losses, db.seals, db.compares, db.shelfLayers, db.shelfContainers, db.shelfEntries], async () => {
     await db.steles.bulkPut(steles);
     await db.rubbings.bulkPut(rubbings);
     await db.losses.bulkPut(losses);
     await db.seals.bulkPut(seals);
     await db.compares.bulkPut(compares);
+    await db.shelfLayers.bulkPut(shelfLayers);
+    await db.shelfContainers.bulkPut(shelfContainers);
+    await db.shelfEntries.bulkPut(shelfEntries);
   });
 }
 
@@ -244,15 +317,21 @@ export interface RubbingSnapshot {
   losses: Loss[];
   seals: Seal[];
   compares: Compare[];
+  shelfLayers: ShelfLayer[];
+  shelfContainers: Container[];
+  shelfEntries: ShelfEntry[];
 }
 
 export async function exportSnapshot(): Promise<RubbingSnapshot> {
-  const [steles, rubbings, losses, seals, compares] = await Promise.all([
+  const [steles, rubbings, losses, seals, compares, shelfLayers, shelfContainers, shelfEntries] = await Promise.all([
     db.steles.toArray(),
     db.rubbings.toArray(),
     db.losses.toArray(),
     db.seals.toArray(),
     db.compares.toArray(),
+    db.shelfLayers.toArray(),
+    db.shelfContainers.toArray(),
+    db.shelfEntries.toArray(),
   ]);
   return {
     app: DB_NAME,
@@ -263,6 +342,9 @@ export async function exportSnapshot(): Promise<RubbingSnapshot> {
     losses,
     seals,
     compares,
+    shelfLayers,
+    shelfContainers,
+    shelfEntries,
   };
 }
 
@@ -278,27 +360,52 @@ export function validateSnapshot(input: unknown): string {
   return '';
 }
 
-export async function clearAllTables(): Promise<void> {
-  await db.transaction('rw', [db.steles, db.rubbings, db.losses, db.seals, db.compares], async () => {
-    await Promise.all([
-      db.steles.clear(),
-      db.rubbings.clear(),
-      db.losses.clear(),
-      db.seals.clear(),
-      db.compares.clear(),
-    ]);
-  });
+/** 旧备份（v2 及以前，无排架账三表）导入时补空集合，不强制升级旧数据 */
+function normalizeSnapshot(snapshot: RubbingSnapshot): RubbingSnapshot {
+  return {
+    ...snapshot,
+    shelfLayers: Array.isArray(snapshot.shelfLayers) ? snapshot.shelfLayers : [],
+    shelfContainers: Array.isArray(snapshot.shelfContainers) ? snapshot.shelfContainers : [],
+    shelfEntries: Array.isArray(snapshot.shelfEntries) ? snapshot.shelfEntries : [],
+  };
 }
 
-export async function importSnapshot(snapshot: RubbingSnapshot): Promise<void> {
+export async function clearAllTables(): Promise<void> {
+  await db.transaction(
+    'rw',
+    [db.steles, db.rubbings, db.losses, db.seals, db.compares, db.shelfLayers, db.shelfContainers, db.shelfEntries],
+    async () => {
+      await Promise.all([
+        db.steles.clear(),
+        db.rubbings.clear(),
+        db.losses.clear(),
+        db.seals.clear(),
+        db.compares.clear(),
+        db.shelfLayers.clear(),
+        db.shelfContainers.clear(),
+        db.shelfEntries.clear(),
+      ]);
+    },
+  );
+}
+
+export async function importSnapshot(raw: RubbingSnapshot): Promise<void> {
+  const snapshot = normalizeSnapshot(raw);
   await clearAllTables();
-  await db.transaction('rw', [db.steles, db.rubbings, db.losses, db.seals, db.compares], async () => {
-    await db.steles.bulkPut(snapshot.steles);
-    await db.rubbings.bulkPut(snapshot.rubbings);
-    await db.losses.bulkPut(snapshot.losses);
-    await db.seals.bulkPut(snapshot.seals);
-    await db.compares.bulkPut(snapshot.compares);
-  });
+  await db.transaction(
+    'rw',
+    [db.steles, db.rubbings, db.losses, db.seals, db.compares, db.shelfLayers, db.shelfContainers, db.shelfEntries],
+    async () => {
+      await db.steles.bulkPut(snapshot.steles);
+      await db.rubbings.bulkPut(snapshot.rubbings);
+      await db.losses.bulkPut(snapshot.losses);
+      await db.seals.bulkPut(snapshot.seals);
+      await db.compares.bulkPut(snapshot.compares);
+      await db.shelfLayers.bulkPut(snapshot.shelfLayers);
+      await db.shelfContainers.bulkPut(snapshot.shelfContainers);
+      await db.shelfEntries.bulkPut(snapshot.shelfEntries);
+    },
+  );
 }
 
 export async function resetDatabase(): Promise<void> {
@@ -307,40 +414,82 @@ export async function resetDatabase(): Promise<void> {
 }
 
 export async function countAll(): Promise<Record<string, number>> {
-  const [steles, rubbings, losses, seals, compares] = await Promise.all([
+  const [steles, rubbings, losses, seals, compares, shelfLayers, shelfContainers, shelfEntries] = await Promise.all([
     db.steles.count(),
     db.rubbings.count(),
     db.losses.count(),
     db.seals.count(),
     db.compares.count(),
+    db.shelfLayers.count(),
+    db.shelfContainers.count(),
+    db.shelfEntries.count(),
   ]);
-  return { steles, rubbings, losses, seals, compares };
+  return { steles, rubbings, losses, seals, compares, shelfLayers, shelfContainers, shelfEntries };
 }
 
-/** 级联删除碑刻 → 拓本 → 损泐 / 钤印 / 比对 */
+/**
+ * 拓本从编目台删除时，排架账不销账：
+ * 实物已在就绪装具里的条目留在原装具（rubbingId 解绑、状态保持在架）；
+ * 其余（含未上架、写库失败装具里的）转待认领，等人核对。
+ * 编目台的拓法 / 损泐字位随拓本删除。
+ */
+async function detachShelfEntriesByRubbing(rubbingIds: string[], tx: Transaction): Promise<void> {
+  const rows = await tx.table<ShelfEntry>('shelfEntries').where('rubbingId').anyOf(rubbingIds).toArray();
+  const containerRows = await tx.table<Container>('shelfContainers').toArray();
+  const containerStatusById = new Map(containerRows.map((container) => [container.id, container.status]));
+  const now = Date.now();
+  await tx.table<ShelfEntry>('shelfEntries').bulkPut(
+    rows.map((row) => {
+      const staysShelved = row.containerId !== null && containerStatusById.get(row.containerId) === 'ready';
+      return {
+        ...row,
+        rubbingId: null,
+        status: staysShelved ? 'shelved' : 'pendingClaim',
+        note: staysShelved
+          ? '拓本已从编目台删除，实物留在原装具，等人认领'
+          : row.containerId
+            ? '拓本已从编目台删除，写库未确认，等人认领'
+            : '拓本已从编目台删除，等人认领',
+        updatedAt: now,
+      };
+    }),
+  );
+}
+
+/** 级联删除碑刻 → 拓本 → 损泐 / 钤印 / 比对；排架账条目解绑后留待认领 */
 export async function removeSteleCascade(steleId: string): Promise<void> {
   const rubbingIds = (await db.rubbings.where('steleId').equals(steleId).toArray()).map((row) => row.id);
-  await db.transaction('rw', [db.steles, db.rubbings, db.losses, db.seals, db.compares], async () => {
-    if (rubbingIds.length > 0) {
-      await db.losses.where('rubbingId').anyOf(rubbingIds).delete();
-      await db.seals.where('rubbingId').anyOf(rubbingIds).delete();
-    }
-    await db.rubbings.where('steleId').equals(steleId).delete();
-    await db.compares.where('steleId').equals(steleId).delete();
-    await db.steles.delete(steleId);
-  });
+  await db.transaction(
+    'rw',
+    [db.steles, db.rubbings, db.losses, db.seals, db.compares, db.shelfEntries, db.shelfContainers],
+    async (tx) => {
+      if (rubbingIds.length > 0) {
+        await db.losses.where('rubbingId').anyOf(rubbingIds).delete();
+        await db.seals.where('rubbingId').anyOf(rubbingIds).delete();
+        await detachShelfEntriesByRubbing(rubbingIds, tx);
+      }
+      await db.rubbings.where('steleId').equals(steleId).delete();
+      await db.compares.where('steleId').equals(steleId).delete();
+      await db.steles.delete(steleId);
+    },
+  );
 }
 
-/** 级联删除拓本 → 损泐 / 钤印 / 涉及的比对记录 */
+/** 级联删除拓本 → 损泐 / 钤印 / 涉及的比对记录；排架账条目解绑后留待认领 */
 export async function removeRubbingCascade(rubbingId: string): Promise<void> {
-  await db.transaction('rw', [db.rubbings, db.losses, db.seals, db.compares], async () => {
-    await db.losses.where('rubbingId').equals(rubbingId).delete();
-    await db.seals.where('rubbingId').equals(rubbingId).delete();
-    const compares = await db.compares.toArray();
-    const affected = compares.filter((row) => row.rubbingIdA === rubbingId || row.rubbingIdB === rubbingId);
-    if (affected.length > 0) await db.compares.bulkDelete(affected.map((row) => row.id));
-    await db.rubbings.delete(rubbingId);
-  });
+  await db.transaction(
+    'rw',
+    [db.rubbings, db.losses, db.seals, db.compares, db.shelfEntries, db.shelfContainers],
+    async (tx) => {
+      await db.losses.where('rubbingId').equals(rubbingId).delete();
+      await db.seals.where('rubbingId').equals(rubbingId).delete();
+      const compares = await tx.table<Compare>('compares').toArray();
+      const affected = compares.filter((row) => row.rubbingIdA === rubbingId || row.rubbingIdB === rubbingId);
+      if (affected.length > 0) await tx.table<Compare>('compares').bulkDelete(affected.map((row) => row.id));
+      await detachShelfEntriesByRubbing([rubbingId], tx);
+      await db.rubbings.delete(rubbingId);
+    },
+  );
 }
 
 /** 重排某碑刻下拓本的版本序号，保证连续 */

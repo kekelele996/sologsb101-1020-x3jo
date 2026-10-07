@@ -7,11 +7,17 @@ import type { Rubbing } from '@/types/rubbing';
 import type { Loss } from '@/types/loss';
 import type { Seal } from '@/types/seal';
 import type { Compare } from '@/types/compare';
+import type { Container, ShelfEntry, ShelfLayer } from '@/types/shelf';
 import { STELE_FORM_LABEL } from '@/types/stele';
 import { INK_TONE_LABEL, RUBBING_METHOD_LABEL, RUBBING_STATE_LABEL } from '@/types/rubbing';
 import { LOSS_SEVERITY_LABEL, LOSS_TYPE_LABEL } from '@/types/loss';
 import { SEAL_TYPE_LABEL, sealPositionWeight } from '@/types/seal';
 import { COMPARE_CONCLUSION_LABEL } from '@/types/compare';
+import {
+  CONTAINER_STATUS_LABEL,
+  SHELF_BUCKET_LABEL,
+  SHELF_ENTRY_STATUS_LABEL,
+} from '@/types/shelf';
 import { diffLosses, encodeCoord, sortLosses } from './collate';
 import type { RubbingSnapshot } from './db';
 
@@ -118,6 +124,62 @@ export interface ExportContext {
   losses: Loss[];
   seals: Seal[];
   compares: Compare[];
+}
+
+/** 排架账导出上下文（库房另记一份，可单独导 CSV 与编目台核对） */
+export interface ShelfExportContext {
+  layers: ShelfLayer[];
+  containers: Container[];
+  entries: ShelfEntry[];
+  rubbings: Rubbing[];
+  steles: Stele[];
+}
+
+/** 库房排架账 CSV（柜位层 / 装具 / 收藏号 / 实测尺寸 / 状态） */
+export function exportShelfLedgerCsv(context: ShelfExportContext): string {
+  const header = ['柜位层', '层内槽位', '装具号', '粗分', '装具状态', '收藏号', '库房实测尺寸', '编目量得留底', '排架状态', '对应碑刻'];
+  const lines: string[] = [header.map(csvCell).join(',')];
+  const containerById = new Map(context.containers.map((container) => [container.id, container]));
+  const layerById = new Map(context.layers.map((layer) => [layer.id, layer]));
+  const rubbingById = new Map(context.rubbings.map((rubbing) => [rubbing.id, rubbing]));
+  const steleById = new Map(context.steles.map((stele) => [stele.id, stele]));
+
+  const orderedEntries = [...context.entries].sort((a, b) => {
+    const ca = a.containerId ? containerById.get(a.containerId) : undefined;
+    const cb = b.containerId ? containerById.get(b.containerId) : undefined;
+    const la = ca ? layerById.get(ca.layerId)?.seq ?? 0 : 0;
+    const lb = cb ? layerById.get(cb.layerId)?.seq ?? 0 : 0;
+    if (la !== lb) return la - lb;
+    if ((ca?.slotNo ?? 0) !== (cb?.slotNo ?? 0)) return (ca?.slotNo ?? 0) - (cb?.slotNo ?? 0);
+    return a.collectionNo.localeCompare(b.collectionNo);
+  });
+
+  orderedEntries.forEach((entry) => {
+    const container = entry.containerId ? containerById.get(entry.containerId) : undefined;
+    const layer = container ? layerById.get(container.layerId) : undefined;
+    const rubbing = entry.rubbingId ? rubbingById.get(entry.rubbingId) : undefined;
+    const stele = rubbing ? steleById.get(rubbing.steleId) : undefined;
+    lines.push(
+      [
+        layer ? layer.name : '',
+        container ? container.slotNo : '',
+        container ? container.code : '',
+        entry.bucket ? SHELF_BUCKET_LABEL[entry.bucket] : '未分',
+        container ? CONTAINER_STATUS_LABEL[container.status] : '',
+        entry.collectionNo,
+        entry.measuredSizeCm,
+        entry.catalogSizeCmSnapshot,
+        SHELF_ENTRY_STATUS_LABEL[entry.status],
+        stele ? stele.title : '',
+      ]
+        .map(csvCell)
+        .join(','),
+    );
+  });
+
+  const filename = `库房排架账-${stampSuffix()}.csv`;
+  download(filename, `﻿${lines.join('\n')}`, 'text/csv;charset=utf-8');
+  return filename;
 }
 
 /** 全部碑刻的编目卡合订文本 */
