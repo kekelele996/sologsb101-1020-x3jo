@@ -12,12 +12,14 @@ import {
   ExportOutlined,
   FileSearchOutlined,
   PrinterOutlined,
+  UnorderedListOutlined,
 } from '@ant-design/icons';
 import { ROUTES } from './router';
 import { loadAll, useAppDispatch, useAppSelector } from './stores/store';
 import { selectSteles } from './stores/steleSlice';
 import { selectRubbings } from './stores/rubbingSlice';
 import { selectLosses } from './stores/lossSlice';
+import { selectContainers, selectShelfIntakes } from './stores/shelfSlice';
 import { initDatabase } from './utils/db';
 import { STELE_FORM_LABEL } from './types/stele';
 
@@ -32,6 +34,8 @@ export default function App() {
   const steles = useAppSelector(selectSteles);
   const rubbings = useAppSelector(selectRubbings);
   const losses = useAppSelector(selectLosses);
+  const containers = useAppSelector(selectContainers);
+  const intakes = useAppSelector(selectShelfIntakes);
   const currentSteleId = useAppSelector((state) => state.stele.currentSteleId);
 
   useEffect(() => {
@@ -58,9 +62,11 @@ export default function App() {
       ? ROUTES.losses
       : location.pathname.startsWith('/compare')
         ? ROUTES.compare
-        : location.pathname.startsWith('/export')
-          ? ROUTES.export
-          : ROUTES.steles;
+        : location.pathname.startsWith('/shelving')
+          ? ROUTES.shelving
+          : location.pathname.startsWith('/export')
+            ? ROUTES.export
+            : ROUTES.steles;
 
   return (
     <Layout style={{ minHeight: '100vh', background: 'transparent' }}>
@@ -84,6 +90,7 @@ export default function App() {
             { key: ROUTES.rubbings, icon: <PrinterOutlined />, label: '拓本登记' },
             { key: ROUTES.losses, icon: <BookOutlined />, label: '损泐字位' },
             { key: ROUTES.compare, icon: <DiffOutlined />, label: '版本比对' },
+            { key: ROUTES.shelving, icon: <UnorderedListOutlined />, label: '库房排架' },
             { key: ROUTES.export, icon: <ExportOutlined />, label: '编目卡导出' },
           ]}
         />
@@ -94,6 +101,7 @@ export default function App() {
             </span>
             <span>拓本 {rubbings.length} 份</span>
             <span>损泐字位 {losses.length} 条</span>
+            <span>装具 {containers.length} 个 · 入库流水 {intakes.length} 条</span>
           </Space>
         </div>
       </Sider>

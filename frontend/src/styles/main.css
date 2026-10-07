@@ -333,3 +333,89 @@ body::before {
 .gb-diff-card.is-b {
   border-left: 4px solid #a8623a;
 }
+
+/* ------------------------------ 库房排架台 ------------------------------ */
+
+.gb-intake-textarea {
+  width: 100%;
+  border: 1px solid var(--gb-line);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  font-size: 13px;
+  line-height: 1.7;
+  background: #fffdf7;
+  color: #2b2a26;
+  resize: vertical;
+}
+
+.gb-intake-textarea:focus {
+  outline: none;
+  border-color: #a8623a;
+  box-shadow: 0 0 0 2px rgba(168, 98, 58, 0.16);
+}
+
+.gb-shelf-board {
+  width: 100%;
+}
+
+.gb-shelf-tier {
+  border: 1px solid var(--gb-line);
+  border-left: 4px solid #2f3a34;
+  border-radius: 8px;
+  background: #fffdf7;
+  padding: 10px 12px;
+}
+
+.gb-shelf-tier__label {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.gb-shelf-tier__slots {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.gb-shelf-slot {
+  border: 1px dashed rgba(47, 58, 52, 0.35);
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: #fbf6ea;
+  min-height: 96px;
+}
+
+.gb-shelf-slot.is-empty {
+  border-style: dashed;
+  background: transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(43, 42, 38, 0.35);
+}
+
+.gb-shelf-slot.is-empty .ant-empty-image {
+  margin-block-end: 0;
+}
+
+.gb-shelf-slot__bar {
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(47, 58, 52, 0.1);
+  overflow: hidden;
+}
+
+.gb-shelf-slot__bar > div {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.2s ease;
+}
+
+@media (max-width: 900px) {
+  .gb-shelf-tier__slots {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

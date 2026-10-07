@@ -73,6 +73,8 @@ import {
   type SealType,
 } from '@/types/seal';
 import { selectLosses } from '@/stores/lossSlice';
+import { selectRubbingPlacementMap } from '@/stores/shelfSlice';
+import { CONTAINER_STATUS_COLOR, CONTAINER_STATUS_LABEL } from '@/types/container';
 import LossTag from '@/components/common/LossTag';
 
 const FILTER_KEYS = ['method', 'state'] as const;
@@ -88,6 +90,7 @@ export default function RubbingList() {
   const filtered = useAppSelector(selectFilteredRubbings);
   const seals = useAppSelector(selectSeals);
   const losses = useAppSelector(selectLosses);
+  const placementMap = useAppSelector(selectRubbingPlacementMap);
   const steleFilterId = useAppSelector((state) => state.rubbing.filters.steleId);
 
   const url = useFilterQuery(FILTER_KEYS);
@@ -216,6 +219,25 @@ export default function RubbingList() {
     { title: '墨色', dataIndex: 'inkTone', width: 90, render: (value: InkTone) => INK_TONE_LABEL[value] },
     { title: '尺寸', dataIndex: 'sizeCm', width: 110, render: (value: string) => value || '未记' },
     { title: '收藏号', dataIndex: 'collectionNo', width: 120, render: (value: string) => value || '未编' },
+    {
+      title: '库房装具',
+      width: 150,
+      render: (_value, record) => {
+        const placement = placementMap.get(record.id);
+        if (!placement) return <Typography.Text type="secondary" style={{ fontSize: 12 }}>未上架</Typography.Text>;
+        return (
+          <Space size={2} direction="vertical">
+            <Tag color={CONTAINER_STATUS_COLOR[placement.status]} style={{ marginInlineEnd: 0 }}>
+              {CONTAINER_STATUS_LABEL[placement.status]}
+            </Tag>
+            <Typography.Text style={{ fontSize: 12 }}>
+              {placement.containerCode}
+              {placement.tierCode ? ` · ${placement.tierCode}-${placement.slotNo ?? '?'}` : ''}
+            </Typography.Text>
+          </Space>
+        );
+      },
+    },
     { title: '年代判断', dataIndex: 'dateGuess', width: 120, render: (value: string) => value || '待考' },
     {
       title: '损泐 / 钤印',

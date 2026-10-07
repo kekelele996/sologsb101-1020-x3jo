@@ -7,11 +7,19 @@ import type { Rubbing } from '@/types/rubbing';
 import type { Loss } from '@/types/loss';
 import type { Seal } from '@/types/seal';
 import type { Compare } from '@/types/compare';
+import type { Container } from '@/types/container';
+import type { ShelfTier } from '@/types/shelfTier';
+import type { ShelfIntake } from '@/types/shelfIntake';
 import { STELE_FORM_LABEL } from '@/types/stele';
 import { INK_TONE_LABEL, RUBBING_METHOD_LABEL, RUBBING_STATE_LABEL } from '@/types/rubbing';
 import { LOSS_SEVERITY_LABEL, LOSS_TYPE_LABEL } from '@/types/loss';
 import { SEAL_TYPE_LABEL, sealPositionWeight } from '@/types/seal';
 import { COMPARE_CONCLUSION_LABEL } from '@/types/compare';
+import { CONTAINER_STATUS_LABEL } from '@/types/container';
+import {
+  SHELF_INTAKE_SOURCE_LABEL,
+  SHELF_INTAKE_STATUS_LABEL,
+} from '@/types/shelfIntake';
 import { diffLosses, encodeCoord, sortLosses } from './collate';
 import type { RubbingSnapshot } from './db';
 
@@ -210,4 +218,94 @@ export async function copyText(text: string): Promise<boolean> {
     return false;
   }
   return false;
+}
+
+/* ------------------------------ 排架账 ------------------------------ */
+
+export interface ShelfLedgerContext {
+  tiers: ShelfTier[];
+  containers: Container[];
+  intakes: ShelfIntake[];
+  rubbings: Rubbing[];
+}
+
+/**
+ * 库房排架账 CSV：批次 / 收藏号 / 认领拓本 / 库房实测尺寸 / 装具 / 柜层槽位 /
+ * 状态 / 尺寸改记 / 来源 / 备注。编目台与库房对账用。
+ */
+export function exportShelfLedgerCsv(context: ShelfLedgerContext): string {
+  const header = [
+    '入库批次',
+    '收藏号',
+    '认领拓本',
+    '库房实测尺寸',
+    '编目原记尺寸',
+    '装具号',
+    '柜层槽位',
+    '状态',
+    '尺寸改记',
+    '来源',
+    '尝试次数',
+    '备注',
+  ];
+  const lines: string[] = [header.map(csvCell).join(',')];
+
+  const rubbingById = new Map(context.rubbings.map((rubbing) => [rubbing.id, rubbing]));
+  const containerById = new Map(context.containers.map((container) => [container.id, container]));
+  const tierById = new Map(context.tiers.map((tier) => [tier.id, tier]));
+
+  const sorted = context.intakes.slice().sort((a, b) => {
+    if (a.batchNo !== b.batchNo) return a.batchNo < b.batchNo ? 1 : -1;
+    return a.createdAt - b.createdAt;
+  });
+
+  sorted.forEach((intake) => {
+    const rubbing = intake.rubbingId ? rubbingById.get(intake.rubbingId) : undefined;
+    const container = intake.containerId ? containerById.get(intake.containerId) : undefined;
+    const tier = container?.shelfTierId ? tierById.get(container.shelfTierId) : undefined;
+    lines.push(
+      [
+        intake.batchNo,
+        intake.collectionNo,
+        rubbing ? `第 ${rubbing.versionNo} 版（${rubbing.collectionNo}）` : '',
+        intake.measuredSize,
+        intake.catalogSizeAtIntake,
+        container?.code ?? '',
+        tier ? `${tier.code}-${container?.slotNo ?? ''}` : '',
+        SHELF_INTAKE_STATUS_LABEL[intake.status],
+        intake.reconciled ? '以库房实测为准' : '',
+        SHELF_INTAKE_SOURCE_LABEL[intake.source],
+        intake.attempts,
+        intake.note || intake.lastWriteError,
+      ]
+        .map(csvCell)
+        .join(','),
+    );
+  });
+
+  // 附装具容量对账小节
+  lines.push('');
+  lines.push(['装具号', '柜层槽位', '状态', '已装拓本数', '尺寸合计(长边cm)', '尝试次数'].map(csvCell).join(','));
+  context.containers
+    .slice()
+    .sort((a, b) => a.code.localeCompare(b.code))
+    .forEach((container) => {
+      const tier = container.shelfTierId ? tierById.get(container.shelfTierId) : undefined;
+      lines.push(
+        [
+          container.code,
+          tier ? `${tier.code}-${container.slotNo ?? ''}` : '',
+          CONTAINER_STATUS_LABEL[container.status],
+          container.items.length,
+          container.usedSizeCm,
+          container.attempts,
+        ]
+          .map(csvCell)
+          .join(','),
+      );
+    });
+
+  const filename = `库房排架账-${stampSuffix()}.csv`;
+  download(filename, `\uFEFF${lines.join('\n')}`, 'text/csv;charset=utf-8');
+  return filename;
 }

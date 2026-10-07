@@ -34,6 +34,7 @@ import { loadAll } from '@/stores/store';
 import { selectSteles, setCurrentStele } from '@/stores/steleSlice';
 import { selectRubbings } from '@/stores/rubbingSlice';
 import { selectCompares, selectLosses } from '@/stores/lossSlice';
+import { selectContainers, selectShelfIntakes, selectShelfTiers } from '@/stores/shelfSlice';
 import { SEAL_TYPE_COLOR, SEAL_TYPE_LABEL, sealPositionWeight, type Seal, type SealType } from '@/types/seal';
 import { RUBBING_METHOD_LABEL, RUBBING_STATE_LABEL } from '@/types/rubbing';
 import { COMPARE_CONCLUSION_COLOR, COMPARE_CONCLUSION_LABEL } from '@/types/compare';
@@ -54,6 +55,7 @@ import {
   copyText,
   exportCatalogCard,
   exportLossLedgerCsv,
+  exportShelfLedgerCsv,
   exportSnapshotJson,
 } from '@/utils/export';
 
@@ -66,6 +68,9 @@ export default function ExportView() {
   const rubbings = useAppSelector(selectRubbings);
   const losses = useAppSelector(selectLosses);
   const compares = useAppSelector(selectCompares);
+  const shelfTiers = useAppSelector(selectShelfTiers);
+  const containers = useAppSelector(selectContainers);
+  const shelfIntakes = useAppSelector(selectShelfIntakes);
   const sealTable = useIdbTable<Seal>((database) => database.seals, { sortByUpdatedAt: false });
 
   const [steleId, setSteleId] = useState<string>('');
@@ -108,12 +113,22 @@ export default function ExportView() {
       losses: losses.length,
       seals: sealTable.rows.length,
       compares: compares.length,
+      containers: containers.length,
+      pendingClaim: shelfIntakes.filter((row) => row.status === 'pendingClaim').length,
       passPercent:
         compares.length === 0
           ? 0
           : Math.round((compares.filter((compare) => compare.conclusion !== 'pending').length / compares.length) * 100),
     }),
-    [compares, losses.length, rubbings.length, sealTable.rows.length, steles.length],
+    [
+      compares,
+      containers.length,
+      losses.length,
+      rubbings.length,
+      sealTable.rows.length,
+      shelfIntakes,
+      steles.length,
+    ],
   );
 
   const handleExport = async (): Promise<void> => {
@@ -240,6 +255,8 @@ export default function ExportView() {
         <StatBadge label="损泐字位" value={stat.losses} suffix="条" tone="warning" />
         <StatBadge label="钤印" value={stat.seals} suffix="方" />
         <StatBadge label="比对记录" value={stat.compares} suffix="条" tone="danger" />
+        <StatBadge label="库房装具" value={stat.containers} suffix="个" tone="info" />
+        <StatBadge label="排架待认领" value={stat.pendingClaim} suffix="条" tone="warning" />
         <StatBadge label="已定断代占比" value={`${stat.passPercent}%`} percent={stat.passPercent} tone="success" />
       </div>
 
@@ -368,12 +385,25 @@ export default function ExportView() {
                 >
                   损泐台账 CSV
                 </Button>
+                <Button
+                  onClick={() => {
+                    const filename = exportShelfLedgerCsv({
+                      tiers: shelfTiers,
+                      containers,
+                      intakes: shelfIntakes,
+                      rubbings,
+                    });
+                    message.success(`已导出 ${filename}`);
+                  }}
+                >
+                  库房排架账 CSV
+                </Button>
               </Space>
               <Alert
                 type="info"
                 showIcon
                 message="无状态容器"
-                description="服务端不保存任何数据；清理浏览器站点数据会丢失档案，请定期导出备份。"
+                description="服务端不保存任何数据；清理浏览器站点数据会丢失档案，请定期导出备份。JSON 备份含 8 张表（含柜层 / 装具 / 入库流水），v2 旧备份缺排架三表时按空集合导入。"
               />
             </Space>
           </Card>
